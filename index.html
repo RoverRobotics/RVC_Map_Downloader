@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>RVC Map Tile Downloader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<nav class="navbar">
+  <img class="nav-logo" src="Rover_logo.png" alt="Rover"/>
+  <h1 class="nav-title">RVC Map Tile Downloader</h1>
+  <button id="themeBtn" class="theme-btn" type="button">Light mode</button>
+</nav>
+
+<div class="wrap">
+  <section class="card">
+    <h2>Download a map</h2>
+
+    <!-- ── Latitude ── -->
+    <div class="field">
+      <div class="label-row">
+        <label for="lat">Latitude</label>
+        <button id="helpBtn" class="btn-help" type="button" aria-expanded="false" aria-controls="helpPanel">? Where do I get this</button>
+      </div>
+      <input type="number" id="lat" step="any" value="44.9281745"/>
+      <span class="hint">How far north or south. Positive = north, negative = south.</span>
+    </div>
+
+    <div id="helpPanel" class="help-panel" hidden>
+      <strong>Check RVC for the lat / long.</strong>
+      Open the RVC web interface, read the robot's current GPS position, and type those
+      two numbers in here.
+      <ol>
+        <li>Open RVC and let the robot get a GPS fix.</li>
+        <li>Read the latitude and longitude it reports.</li>
+        <li>Copy them here exactly &mdash; keep all the decimal places.</li>
+      </ol>
+    </div>
+
+    <!-- ── Longitude ── -->
+    <div class="field">
+      <label for="lon">Longitude</label>
+      <input type="number" id="lon" step="any" value="-93.4041489"/>
+      <span class="hint">How far east or west. Positive = east, negative = west.</span>
+    </div>
+
+    <!-- ── Zoom ── -->
+    <div class="field">
+      <label for="zoom">Zoom (0 &ndash; 19)</label>
+      <input type="number" id="zoom" min="0" max="19" step="1" value="18"/>
+      <span class="hint">Bigger number = more detail, smaller area. 18 suits a rover test site.</span>
+    </div>
+
+    <!-- ── Grid ── -->
+    <div class="field">
+      <label for="grid">Grid (odd number: 3 &rarr; 3&times;3)</label>
+      <input type="number" id="grid" min="1" max="11" step="2" value="3"/>
+      <span class="hint">How many map squares wide and tall. Your point sits in the middle.</span>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- ── API key ── -->
+    <div class="field">
+      <div class="label-row">
+        <label for="apikey">API key</label>
+        <button id="keyHelpBtn" class="btn-help" type="button" aria-expanded="false" aria-controls="keyHelpPanel">? How do I get a key</button>
+      </div>
+      <input type="text" id="apikey" spellcheck="false" autocomplete="off" placeholder="paste your key here"/>
+      <span class="hint">Saved in this browser, so you only paste it once.</span>
+    </div>
+
+    <div id="keyHelpPanel" class="help-panel" hidden>
+      <strong>Getting a MapTiler key &mdash; one time only.</strong>
+      <ol>
+        <li>Go to <strong>maptiler.com</strong> and create an account.</li>
+        <li>Open your account dashboard and find the <strong>API keys</strong> page.</li>
+        <li>Create a new key &mdash; just giving it a name should be good.</li>
+        <li>Paste the new API key, or an existing API key, in the box above.</li>
+      </ol>
+    </div>
+
+    <!-- ── Actions ── -->
+    <div class="btn-row">
+      <button id="previewBtn" class="btn" type="button">Preview</button>
+      <button id="downloadBtn" class="btn btn-primary" type="button" disabled>Download Image</button>
+    </div>
+
+    <div id="status" class="status">Fill in the boxes, then press Preview.</div>
+
+    <div class="preview-shell">
+      <canvas id="tileCanvas" hidden></canvas>
+      <img id="tilePreview" alt="Map preview" hidden />
+      <div id="placeholder" class="placeholder">No preview yet</div>
+    </div>
+
+    <div class="warn-box">
+      <h3>Do not rename the file</h3>
+      <p>
+        The downloaded image already has the correct name. RVC reads the latitude, longitude,
+        zoom and grid size <em>out of the file name</em> to place the map correctly &mdash; if you
+        rename it, RVC cannot use it.
+      </p>
+      <code id="nameSample">tiles_lat44_9281745_lon-93_4041489_z18_g3.png</code>
+    </div>
+  </section>
+</div>
+
+<footer>&copy; MapTiler &copy; OpenStreetMap contributors &nbsp;&middot;&nbsp; Rover &ndash; RVC</footer>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  // ── Tile source ────────────────────────────────────────────
+  // One provider, fixed. Only the API key is supplied by the user.
+  // Replace TILE_URL below if you switch providers or map styles.
+  const TILE_URL   = 'https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key={key}';
+  // Credit drawn into the corner of every downloaded image. OSM's licence
+  // requires attribution to travel with the image, not just sit on this page.
+  const CREDIT     = '© MapTiler  © OpenStreetMap contributors';
+  const KEY_STORE  = 'rvc_tile_key';
+
+  // ── Theme ──────────────────────────────────────────────────
+  const THEME_STORE = 'rvc_theme';
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    $('themeBtn').textContent = (t === 'light') ? 'Dark mode' : 'Light mode';
+    try { localStorage.setItem(THEME_STORE, t); } catch (e) { /* storage blocked */ }
+  }
+  let theme = 'dark';
+  try { theme = localStorage.getItem(THEME_STORE) || 'dark'; } catch (e) { /* storage blocked */ }
+  applyTheme(theme);
+  $('themeBtn').addEventListener('click', () => {
+    theme = (document.documentElement.getAttribute('data-theme') === 'light') ? 'dark' : 'light';
+    applyTheme(theme);
+  });
+
+  // ── Status line ────────────────────────────────────────────
+  const statusEl = $('status');
+  function setStatus(msg, cls = '') {
+    statusEl.textContent = msg;
+    statusEl.className = 'status ' + cls;
+  }
+
+  // ── OSM tile maths (unchanged from the original page) ──────
+  function latLonToTile(lat, lon, z) {
+    const latRad = lat * Math.PI / 180;
+    const n = 1 << z;
+    const x = Math.floor((lon + 180) / 360 * n);
+    const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+    return { z, x, y };
+  }
+  function clampOdd(n, min = 1, max = 11) {
+    n = Math.max(min, Math.min(max, n | 0));
+    return (n % 2 === 0) ? n + 1 : n;
+  }
+  function makeTileUrl({ z, x, y }, key) {
+    return TILE_URL
+      .replace('{z}', z).replace('{x}', x).replace('{y}', y)
+      .replace('{key}', encodeURIComponent(key));
+  }
+  // Exact same scheme the original page used — RVC parses this.
+  function makeFileName(lat, lon, zoom, grid) {
+    const safeLat = lat.toString().replace(/\./g, '_');
+    const safeLon = lon.toString().replace(/\./g, '_');
+    return `tiles_lat${safeLat}_lon${safeLon}_z${zoom}_g${clampOdd(grid)}.png`;
+  }
+
+  // ── API key persistence ────────────────────────────────────
+  try {
+    const saved = localStorage.getItem(KEY_STORE);
+    if (saved) $('apikey').value = saved;
+  } catch (e) { /* storage blocked */ }
+
+  // ── Input validation ───────────────────────────────────────
+  function readInputs() {
+    const lat  = parseFloat($('lat').value);
+    const lon  = parseFloat($('lon').value);
+    const zoom = parseInt($('zoom').value, 10);
+    const grid = parseInt($('grid').value, 10);
+    const key  = $('apikey').value.trim();
+
+    if (!Number.isFinite(lat) || lat < -85 || lat > 85)
+      return { error: 'Latitude must be a number between -85 and 85.' };
+    if (!Number.isFinite(lon) || lon < -180 || lon > 180)
+      return { error: 'Longitude must be a number between -180 and 180.' };
+    if (!Number.isFinite(zoom) || zoom < 0 || zoom > 19)
+      return { error: 'Zoom must be a whole number between 0 and 19.' };
+    if (!Number.isFinite(grid) || grid < 1 || grid > 11)
+      return { error: 'Grid must be an odd number between 1 and 11.' };
+    if (!key)
+      return { error: 'Paste your API key first — see "? How do I get a key".' };
+
+    return { lat, lon, zoom, grid: clampOdd(grid), key };
+  }
+
+  // ── Attribution burned into the image ──────────────────────
+  function drawCredit(ctx, w, h) {
+    const size = Math.max(11, Math.min(26, Math.round(w * 0.016)));
+    ctx.save();
+    ctx.font = `${size}px 'Share Tech Mono', 'Courier New', monospace`;
+    ctx.textBaseline = 'alphabetic';
+    const padX = Math.round(size * 0.6);
+    const padY = Math.round(size * 0.45);
+    const textW = ctx.measureText(CREDIT).width;
+    const boxW = textW + padX * 2;
+    const boxH = size + padY * 2;
+    const x = w - boxW;
+    const y = h - boxH;
+    ctx.fillStyle = 'rgba(255,255,255,0.78)';
+    ctx.fillRect(x, y, boxW, boxH);
+    ctx.fillStyle = '#111111';
+    ctx.fillText(CREDIT, x + padX, y + padY + size * 0.82);
+    ctx.restore();
+  }
+
+  // ── Tile fetch + stitch ────────────────────────────────────
+  function drawGrid(lat, lon, zoom, gridSize, key, cb) {
+    gridSize = clampOdd(gridSize);
+    const center = latLonToTile(lat, lon, zoom);
+    const half = Math.floor(gridSize / 2);
+    const canvas = $('tileCanvas');
+    const ctx = canvas.getContext('2d');
+    const tileSize = 256;
+
+    canvas.width  = tileSize * gridSize;
+    canvas.height = tileSize * gridSize;
+    ctx.fillStyle = '#e9e6df';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const total = gridSize * gridSize;
+    let remaining = total, loaded = 0, failed = 0;
+
+    for (let dx = -half; dx <= half; dx++) {
+      for (let dy = -half; dy <= half; dy++) {
+        const url = makeTileUrl({ z: zoom, x: center.x + dx, y: center.y + dy }, key);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          ctx.drawImage(img, (dx + half) * tileSize, (dy + half) * tileSize, tileSize, tileSize);
+          loaded++;
+          setStatus(`Loading tiles… ${loaded + failed} / ${total}`);
+          if (--remaining === 0) { drawCredit(ctx, canvas.width, canvas.height); cb(canvas, loaded, failed); }
+        };
+        img.onerror = () => {
+          console.error('Tile failed', url);
+          failed++;
+          setStatus(`Loading tiles… ${loaded + failed} / ${total}`);
+          if (--remaining === 0) { drawCredit(ctx, canvas.width, canvas.height); cb(canvas, loaded, failed); }
+        };
+        img.src = url;
+      }
+    }
+  }
+
+  // ── Live filename sample + invalidate stale preview ────────
+  function refreshNameSample() {
+    const lat  = parseFloat($('lat').value);
+    const lon  = parseFloat($('lon').value);
+    const zoom = parseInt($('zoom').value, 10);
+    const grid = parseInt($('grid').value, 10);
+    if (![lat, lon, zoom, grid].every(Number.isFinite)) return;
+    $('nameSample').textContent = makeFileName(lat, lon, zoom, clampOdd(grid));
+  }
+  ['lat', 'lon', 'zoom', 'grid'].forEach(id =>
+    $(id).addEventListener('input', () => {
+      refreshNameSample();
+      if (!$('downloadBtn').disabled) {
+        $('downloadBtn').disabled = true;
+        setStatus('Settings changed — press Preview again.', 'warn');
+      }
+    })
+  );
+  refreshNameSample();
+
+  // ── Help toggles ───────────────────────────────────────────
+  function wireHelp(btnId, panelId) {
+    $(btnId).addEventListener('click', () => {
+      const panel = $(panelId);
+      const open = panel.hidden;
+      panel.hidden = !open;
+      $(btnId).setAttribute('aria-expanded', String(open));
+    });
+  }
+  wireHelp('helpBtn', 'helpPanel');
+  wireHelp('keyHelpBtn', 'keyHelpPanel');
+
+  // ── Preview ────────────────────────────────────────────────
+  $('previewBtn').addEventListener('click', () => {
+    const v = readInputs();
+    if (v.error) { setStatus(v.error, 'err'); return; }
+
+    try { localStorage.setItem(KEY_STORE, v.key); } catch (e) { /* storage blocked */ }
+
+    $('downloadBtn').disabled = true;
+    $('previewBtn').disabled = true;
+    setStatus('Loading tiles…');
+
+    drawGrid(v.lat, v.lon, v.zoom, v.grid, v.key, (canvas, loaded, failed) => {
+      $('previewBtn').disabled = false;
+      $('placeholder').hidden = true;
+      const img = $('tilePreview');
+      img.src = canvas.toDataURL('image/png');
+      img.hidden = false;
+      canvas.hidden = true;
+
+      if (loaded === 0) {
+        setStatus('No tiles loaded. Check your API key and internet connection.', 'err');
+        return;
+      }
+      $('downloadBtn').disabled = false;
+      if (failed > 0) setStatus(`Preview ready — ${failed} tile(s) failed to load.`, 'warn');
+      else setStatus(`Preview ready — ${loaded} tiles, ${canvas.width}×${canvas.height} px.`, 'ok');
+    });
+  });
+
+  // ── Download ───────────────────────────────────────────────
+  $('downloadBtn').addEventListener('click', () => {
+    const v = readInputs();
+    if (v.error) { setStatus(v.error, 'err'); return; }
+
+    const name = makeFileName(v.lat, v.lon, v.zoom, v.grid);
+    $('tileCanvas').toBlob(blob => {
+      if (!blob) { setStatus('Could not build the image.', 'err'); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setStatus(`Saved as ${name} — do not rename it.`, 'ok');
+    }, 'image/png');
+  });
+</script>
+
+</body>
+</html>
