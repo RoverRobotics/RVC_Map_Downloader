@@ -19,3 +19,7 @@ RVC parses the latitude, longitude, zoom and grid size out of the file name:
 ```
 tiles_lat<LAT>_lon<LON>_z<ZOOM>_g<GRID>.png     (dots in lat/lon become underscores)
 ```
+Web UI Link: 
+```
+https://roverrobotics.github.io/RVC_Map_Downloader/
+```
