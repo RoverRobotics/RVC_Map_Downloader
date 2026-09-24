@@ -21,5 +21,5 @@ tiles_lat<LAT>_lon<LON>_z<ZOOM>_g<GRID>.png     (dots in lat/lon become undersco
 ```
 Web UI Link: 
 ```
-https://roverrobotics.github.io/RVC_Map_Downloader/
+[https://roverrobotics.github.io/RVC_Map_Downloader/](https://roverrobotics.github.io/RVC_Map_Downloader/)
 ```
